@@ -1,4 +1,4 @@
-module github.com/aki-xavier/websocketconn
+module github.com/aki-xavier/wsutil
 
 go 1.13
 

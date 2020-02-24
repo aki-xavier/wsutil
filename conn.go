@@ -1,4 +1,4 @@
-package websocketconn
+package wsutil
 
 import (
 	"encoding/base64"
