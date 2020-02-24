@@ -57,18 +57,9 @@ func (c *Conn) Start() {
 }
 
 func (c *Conn) dispose() {
-	if c.Read != nil {
-		close(c.Read)
-		c.Read = nil
-	}
-	if c.Write != nil {
-		close(c.Write)
-		c.Write = nil
-	}
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
+	close(c.Read)
+	close(c.Write)
+	c.conn.Close()
 }
 
 func (c *Conn) readPump() {
