@@ -3,7 +3,6 @@ package wsutil
 import (
 	"encoding/base64"
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
@@ -24,8 +23,8 @@ type Conn struct {
 	MaxMessageSize int64
 }
 
-// CreateConn : pass in nil for upgrader to use the default one
-func CreateConn(w http.ResponseWriter, r *http.Request, upgrader *websocket.Upgrader) (*Conn, error) {
+// Upgrade : pass in nil for upgrader to use the default one
+func Upgrade(w http.ResponseWriter, r *http.Request, upgrader *websocket.Upgrader) (*Conn, error) {
 	if upgrader == nil {
 		upgrader = &websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -33,6 +32,26 @@ func CreateConn(w http.ResponseWriter, r *http.Request, upgrader *websocket.Upgr
 		}
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return nil, err
+	}
+	c := &Conn{}
+	c.conn = conn
+	c.readBuffer = make([]byte, 0)
+	uuidstring, _ := uuid.NewV4()
+	c.ID = base64.RawURLEncoding.EncodeToString(uuidstring.Bytes())
+	c.Read = make(chan map[string]interface{})
+	c.Write = make(chan map[string]interface{})
+	c.WriteWait = 10 * time.Second
+	c.PongWait = 60 * time.Second
+	c.PingPeriod = (c.PongWait * 9) / 10
+	c.MaxMessageSize = 512
+	return c, nil
+}
+
+// Dial :
+func Dial(addr string, header http.Header) (*Conn, error) {
+	conn, _, err := websocket.DefaultDialer.Dial(addr, header)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +98,6 @@ func (c *Conn) readPump() {
 	for {
 		mt, message, err := c.conn.ReadMessage()
 		if err != nil {
-			log.Println("read error:", err)
 			c.Close()
 			return
 		}
