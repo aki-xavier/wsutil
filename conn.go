@@ -14,7 +14,7 @@ import (
 // Conn :
 type Conn struct {
 	conn           *websocket.Conn
-	readBuff       []byte // a single json object can be transmitted via several packages
+	readBuffer     []byte // a single json object can be transmitted via several packages
 	ID             string
 	Read           chan map[string]interface{}
 	Write          chan map[string]interface{}
@@ -24,20 +24,21 @@ type Conn struct {
 	MaxMessageSize int64
 }
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
-
-// CreateConn :
-func CreateConn(w http.ResponseWriter, r *http.Request) (*Conn, error) {
+// CreateConn : pass in nil for upgrader to use the default one
+func CreateConn(w http.ResponseWriter, r *http.Request, upgrader *websocket.Upgrader) (*Conn, error) {
+	if upgrader == nil {
+		upgrader = &websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+		}
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return nil, err
 	}
 	c := &Conn{}
 	c.conn = conn
-	c.readBuff = make([]byte, 0)
+	c.readBuffer = make([]byte, 0)
 	uuidstring, _ := uuid.NewV4()
 	c.ID = base64.RawURLEncoding.EncodeToString(uuidstring.Bytes())
 	c.Read = make(chan map[string]interface{})
@@ -46,7 +47,6 @@ func CreateConn(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 	c.PongWait = 60 * time.Second
 	c.PingPeriod = (c.PongWait * 9) / 10
 	c.MaxMessageSize = 512
-	defer c.dispose()
 	return c, nil
 }
 
@@ -56,10 +56,20 @@ func (c *Conn) Start() {
 	go c.writePump()
 }
 
-func (c *Conn) dispose() {
-	close(c.Read)
-	close(c.Write)
-	c.conn.Close()
+// Close :
+func (c *Conn) Close() {
+	if c.Read != nil {
+		close(c.Read)
+		c.Read = nil
+	}
+	if c.Write != nil {
+		close(c.Write)
+		c.Write = nil
+	}
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
 }
 
 func (c *Conn) readPump() {
@@ -70,7 +80,7 @@ func (c *Conn) readPump() {
 		mt, message, err := c.conn.ReadMessage()
 		if err != nil {
 			log.Println("read error:", err)
-			c.dispose()
+			c.Close()
 			return
 		}
 		if mt == websocket.BinaryMessage {
@@ -78,9 +88,9 @@ func (c *Conn) readPump() {
 		}
 
 		obj := make(map[string]interface{})
-		err = json.Unmarshal(append(c.readBuff, message...), &obj)
+		err = json.Unmarshal(append(c.readBuffer, message...), &obj)
 		if err == nil {
-			c.readBuff = make([]byte, 0)
+			c.readBuffer = make([]byte, 0)
 			c.Read <- obj
 			continue
 		}
@@ -88,12 +98,12 @@ func (c *Conn) readPump() {
 		obj2 := make(map[string]interface{})
 		err = json.Unmarshal(message, &obj2)
 		if err == nil {
-			c.readBuff = make([]byte, 0)
+			c.readBuffer = make([]byte, 0)
 			c.Read <- obj2
 			continue
 		}
 
-		c.readBuff = append(c.readBuff, message...)
+		c.readBuffer = append(c.readBuffer, message...)
 	}
 }
 
@@ -103,12 +113,14 @@ func (c *Conn) writePump() {
 	for {
 		select {
 		case message, ok := <-c.Write:
-			c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				c.dispose()
+				if c.conn != nil {
+					c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				}
+				c.Close()
 				return
 			}
+			c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			b, err := json.Marshal(message)
 			if err != nil {
 				continue
@@ -117,7 +129,7 @@ func (c *Conn) writePump() {
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				c.dispose()
+				c.Close()
 				return
 			}
 		}
