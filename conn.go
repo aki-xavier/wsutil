@@ -2,22 +2,22 @@ package wsutil
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
 	uuid "github.com/satori/go.uuid"
-	"github.com/stretchr/objx"
 )
 
 // Conn :
 type Conn struct {
-	ID             string
 	conn           *websocket.Conn
-	readBuff       string // a single json object can be transmitted via several packages
+	readBuff       []byte // a single json object can be transmitted via several packages
+	ID             string
 	Read           chan map[string]interface{}
-	Write          chan []byte
+	Write          chan map[string]interface{}
 	WriteWait      time.Duration
 	PongWait       time.Duration
 	PingPeriod     time.Duration
@@ -37,11 +37,11 @@ func CreateConn(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 	}
 	c := &Conn{}
 	c.conn = conn
+	c.readBuff = make([]byte, 0)
 	uuidstring, _ := uuid.NewV4()
 	c.ID = base64.RawURLEncoding.EncodeToString(uuidstring.Bytes())
-	c.readBuff = ""
 	c.Read = make(chan map[string]interface{})
-	c.Write = make(chan []byte)
+	c.Write = make(chan map[string]interface{})
 	c.WriteWait = 10 * time.Second
 	c.PongWait = 60 * time.Second
 	c.PingPeriod = (c.PongWait * 9) / 10
@@ -77,22 +77,23 @@ func (c *Conn) readPump() {
 			continue
 		}
 
-		m := c.readBuff + string(message)
-		json, err := objx.FromJSON(m)
+		obj := make(map[string]interface{})
+		err = json.Unmarshal(append(c.readBuff, message...), &obj)
 		if err == nil {
-			c.readBuff = ""
-			c.Read <- json
+			c.readBuff = make([]byte, 0)
+			c.Read <- obj
 			continue
 		}
 
-		json2, err := objx.FromJSON(string(message))
-		if err == nil { // dispose broken readBuff
-			c.readBuff = ""
-			c.Read <- json2
+		obj2 := make(map[string]interface{})
+		err = json.Unmarshal(message, &obj2)
+		if err == nil {
+			c.readBuff = make([]byte, 0)
+			c.Read <- obj2
 			continue
 		}
 
-		c.readBuff = m
+		c.readBuff = append(c.readBuff, message...)
 	}
 }
 
@@ -108,8 +109,11 @@ func (c *Conn) writePump() {
 				c.dispose()
 				return
 			}
-
-			c.conn.WriteMessage(websocket.TextMessage, message)
+			b, err := json.Marshal(message)
+			if err != nil {
+				continue
+			}
+			c.conn.WriteMessage(websocket.TextMessage, b)
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
