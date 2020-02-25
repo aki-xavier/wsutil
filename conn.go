@@ -10,9 +10,16 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
+// ConnType :
+const (
+	ConnTypeClient = iota
+	ConnTypeServer
+)
+
 // Conn :
 type Conn struct {
 	conn           *websocket.Conn
+	connType       int
 	readBuffer     []byte // a single json object can be transmitted via several packages
 	ID             string
 	Read           chan map[string]interface{}
@@ -37,6 +44,7 @@ func Upgrade(w http.ResponseWriter, r *http.Request, upgrader *websocket.Upgrade
 	}
 	c := &Conn{}
 	c.conn = conn
+	c.connType = ConnTypeServer
 	c.readBuffer = make([]byte, 0)
 	uuidstring, _ := uuid.NewV4()
 	c.ID = base64.RawURLEncoding.EncodeToString(uuidstring.Bytes())
@@ -57,6 +65,7 @@ func Dial(addr string, header http.Header) (*Conn, error) {
 	}
 	c := &Conn{}
 	c.conn = conn
+	c.connType = ConnTypeClient
 	c.readBuffer = make([]byte, 0)
 	uuidstring, _ := uuid.NewV4()
 	c.ID = base64.RawURLEncoding.EncodeToString(uuidstring.Bytes())
@@ -93,15 +102,17 @@ func (c *Conn) Close() {
 
 func (c *Conn) readPump() {
 	c.conn.SetReadLimit(c.MaxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(c.PongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(c.PongWait)); return nil })
+	if c.connType == ConnTypeServer {
+		c.conn.SetReadDeadline(time.Now().Add(c.PongWait))
+		c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(c.PongWait)); return nil })
+	}
 	for {
 		mt, message, err := c.conn.ReadMessage()
 		if err != nil {
 			c.Close()
 			return
 		}
-		if mt == websocket.BinaryMessage {
+		if mt == websocket.BinaryMessage { // do not support binary message
 			continue
 		}
 
@@ -126,11 +137,36 @@ func (c *Conn) readPump() {
 }
 
 func (c *Conn) writePump() {
-	ticker := time.NewTicker(c.PingPeriod)
-	defer ticker.Stop()
-	for {
-		select {
-		case message, ok := <-c.Write:
+	if c.connType == ConnTypeServer {
+		ticker := time.NewTicker(c.PingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case message, ok := <-c.Write:
+				if !ok {
+					if c.conn != nil {
+						c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+					}
+					c.Close()
+					return
+				}
+				c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
+				b, err := json.Marshal(message)
+				if err != nil {
+					continue
+				}
+				c.conn.WriteMessage(websocket.TextMessage, b)
+			case <-ticker.C:
+				c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
+				if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					c.Close()
+					return
+				}
+			}
+		}
+	} else {
+		for {
+			message, ok := <-c.Write
 			if !ok {
 				if c.conn != nil {
 					c.conn.WriteMessage(websocket.CloseMessage, []byte{})
@@ -144,12 +180,6 @@ func (c *Conn) writePump() {
 				continue
 			}
 			c.conn.WriteMessage(websocket.TextMessage, b)
-		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				c.Close()
-				return
-			}
 		}
 	}
 }
