@@ -22,11 +22,18 @@ var (
 	Debug = false
 )
 
-func debugPrint(val interface{}) {
+func debugPrint(val ...interface{}) {
 	if !Debug {
 		return
 	}
-	fmt.Printf("[wsutil] %v\n", val)
+	ret := ""
+	for index, v := range val {
+		if index != 0 {
+			ret += " "
+		}
+		ret += fmt.Sprintf("%v", v)
+	}
+	fmt.Printf("[wsutil] %s\n", ret)
 }
 
 // Conn :
@@ -99,7 +106,7 @@ func (c *Conn) Start() {
 
 // Close :
 func (c *Conn) Close() {
-	debugPrint("closing conn " + c.ID)
+	debugPrint(1, "closing conn", c.ID)
 	if c.Read != nil {
 		close(c.Read)
 		c.Read = nil
@@ -123,12 +130,12 @@ func (c *Conn) readPump() {
 	for {
 		mt, message, err := c.conn.ReadMessage()
 		if err != nil {
-			debugPrint(err)
+			debugPrint(2, err)
 			c.Close()
 			return
 		}
 		if mt == websocket.BinaryMessage { // do not support binary message
-			debugPrint("do not support binary message")
+			debugPrint(3, "do not support binary message")
 			continue
 		}
 
@@ -163,21 +170,21 @@ func (c *Conn) writePump() {
 					if c.conn != nil {
 						c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 					}
-					debugPrint("write chan error")
+					debugPrint(4, "write chan error")
 					c.Close()
 					return
 				}
 				c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 				b, err := json.Marshal(message)
 				if err != nil {
-					debugPrint("marshal message error")
+					debugPrint(5, err)
 					continue
 				}
 				c.conn.WriteMessage(websocket.TextMessage, b)
 			case <-ticker.C:
 				c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 				if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					debugPrint(err)
+					debugPrint(6, err)
 					c.Close()
 					return
 				}
@@ -190,14 +197,14 @@ func (c *Conn) writePump() {
 				if c.conn != nil {
 					c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				}
-				debugPrint("write chan error")
+				debugPrint(7, "write chan error")
 				c.Close()
 				return
 			}
 			c.conn.SetWriteDeadline(time.Now().Add(c.WriteWait))
 			b, err := json.Marshal(message)
 			if err != nil {
-				debugPrint("marshal message error")
+				debugPrint(8, err)
 				continue
 			}
 			c.conn.WriteMessage(websocket.TextMessage, b)
