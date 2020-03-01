@@ -38,16 +38,15 @@ func debugPrint(val ...interface{}) {
 
 // Conn :
 type Conn struct {
-	conn           *websocket.Conn
-	connType       int
-	readBuffer     []byte // a single json object can be transmitted via several packages
-	ID             string
-	Read           chan map[string]interface{}
-	Write          chan map[string]interface{}
-	WriteWait      time.Duration
-	PongWait       time.Duration
-	PingPeriod     time.Duration
-	MaxMessageSize int64
+	conn       *websocket.Conn
+	connType   int
+	readBuffer []byte // a single json object can be transmitted via several packages
+	ID         string
+	Read       chan map[string]interface{}
+	Write      chan map[string]interface{}
+	WriteWait  time.Duration
+	PongWait   time.Duration
+	PingPeriod time.Duration
 }
 
 // Upgrade : pass in nil for upgrader to use the default one
@@ -73,7 +72,6 @@ func Upgrade(w http.ResponseWriter, r *http.Request, upgrader *websocket.Upgrade
 	c.WriteWait = 10 * time.Second
 	c.PongWait = 60 * time.Second
 	c.PingPeriod = (c.PongWait * 9) / 10
-	c.MaxMessageSize = 512
 	return c, nil
 }
 
@@ -94,7 +92,6 @@ func Dial(addr string, header http.Header) (*Conn, error) {
 	c.WriteWait = 10 * time.Second
 	c.PongWait = 60 * time.Second
 	c.PingPeriod = (c.PongWait * 9) / 10
-	c.MaxMessageSize = 512
 	return c, nil
 }
 
@@ -122,7 +119,6 @@ func (c *Conn) Close() {
 }
 
 func (c *Conn) readPump() {
-	c.conn.SetReadLimit(c.MaxMessageSize)
 	if c.connType == ConnTypeServer {
 		c.conn.SetReadDeadline(time.Now().Add(c.PongWait))
 		c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(c.PongWait)); return nil })
