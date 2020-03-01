@@ -8,6 +8,7 @@ import (
 )
 
 func main() {
+	wsutil.Debug = true
 	conn, err := wsutil.Dial("ws://localhost:8848/ws", nil)
 	if err != nil {
 		panic(err)

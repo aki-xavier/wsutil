@@ -31,10 +31,10 @@ func serveWs(w http.ResponseWriter, r *http.Request) {
 		break
 	}
 	conn.Close()
-	log.Println("ending conn")
 }
 
 func main() {
+	wsutil.Debug = true
 	http.HandleFunc("/ws", serveWs)
 	log.Println("start listening at :8848")
 	err := http.ListenAndServe("localhost:8848", nil)
